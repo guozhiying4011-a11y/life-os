@@ -1707,7 +1707,7 @@ function formatDateLabel() {
   return `${d.getMonth() + 1}月${d.getDate()}日 · ${weekday}`;
 }
 
-function MeScreen({ state, setState, history, setHistory, entries, setEntries, todos, setTodos, studySessions, setStudySessions, savings, onResetAll }) {
+function MeScreen({ state, setState, history, setHistory, entries, setEntries, todos, setTodos, studySessions, setStudySessions, savings, setSavings, onResetAll }) {
   const [budgetInput, setBudgetInput] = useState(String(state.budgetToday));
   const [studyGoalInput, setStudyGoalInput] = useState(String(state.studyGoalMinutes));
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -1760,6 +1760,7 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
       todos,
       history,
       studySessions,
+      savings,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1789,6 +1790,7 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
         if (Array.isArray(parsed.todos)) setTodos(parsed.todos);
         if (Array.isArray(parsed.history)) setHistory(parsed.history);
         if (Array.isArray(parsed.studySessions)) setStudySessions(parsed.studySessions);
+        if (Array.isArray(parsed.savings)) setSavings(parsed.savings);
         setImportDone(true);
         setTimeout(() => setImportDone(false), 2500);
       } catch (err) {
@@ -2178,6 +2180,7 @@ function App() {
           studySessions={studySessions}
           setStudySessions={setStudySessions}
           savings={savings}
+          setSavings={setSavings}
           onResetAll={resetAllData}
         />
       )}
