@@ -307,6 +307,30 @@ const sumEntriesSince = (entries, dateStr) =>
     entries.filter((e) => entryDateStr(e.t) >= dateStr).reduce((sum, e) => sum + e.amount, 0) * 100
   ) / 100;
 
+// ---------- savings (存钱) ----------
+const SAVINGS_KEY = "savings-entries";
+const loadSavings = () => {
+  try {
+    const raw = localStorage.getItem(SAVINGS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+};
+const saveSavings = (savings) => {
+  try {
+    localStorage.setItem(SAVINGS_KEY, JSON.stringify(savings));
+  } catch (e) {}
+};
+const sumSavingsForDate = (savings, dateStr) =>
+  Math.round(
+    savings.filter((e) => entryDateStr(e.t) === dateStr).reduce((sum, e) => sum + e.amount, 0) * 100
+  ) / 100;
+const sumSavingsSince = (savings, dateStr) =>
+  Math.round(
+    savings.filter((e) => entryDateStr(e.t) >= dateStr).reduce((sum, e) => sum + e.amount, 0) * 100
+  ) / 100;
+
 const formatHours = (minutes) => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -316,7 +340,7 @@ const formatHours = (minutes) => {
 };
 
 
-function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy, onRecordDay }) {
+function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy, onOpenLedgerStats, onRecordDay }) {
   const [holdProgress, setHoldProgress] = useState(0);
   const [holding, setHolding] = useState(false);
 
@@ -426,14 +450,14 @@ function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy
         {!state.ended ? (
           <div className="scrollless">
             <Section title="今日消费" compact>
-              <div className="card-compact">
+              <div className="card-compact card-tappable" onClick={onOpenLedgerStats}>
                 <div className="row-between-compact">
                   <span className="spend-amount">¥{state.spendToday}</span>
                   <span
                     className="card-value-muted"
                     style={{ color: budgetLeft >= 0 ? "var(--muted)" : "var(--clay)" }}
                   >
-                    {budgetLeft >= 0 ? `预算剩 ¥${budgetLeft}` : `超出预算 ¥${Math.abs(budgetLeft)}`}
+                    {budgetLeft >= 0 ? `预算剩 ¥${budgetLeft} ›` : `超出预算 ¥${Math.abs(budgetLeft)} ›`}
                   </span>
                 </div>
                 <div className="bar-track-tight">
@@ -544,11 +568,13 @@ function Section({ title, sub, children, grow, onSubClick }) {
   );
 }
 
-function LedgerScreen({ entries, setEntries, spendToday, budgetToday, jumpToAdd, onConsumeJump }) {
+function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, budgetToday, jumpToAdd, jumpToStats, onConsumeJump, onConsumeStatsJump }) {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState(null);
   const [subCategory, setSubCategory] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [addingSaving, setAddingSaving] = useState(false);
+  const [savingAmount, setSavingAmount] = useState("");
   const [view, setView] = useState("list"); // list | stats
 
   useEffect(() => {
@@ -559,12 +585,23 @@ function LedgerScreen({ entries, setEntries, spendToday, budgetToday, jumpToAdd,
     }
   }, [jumpToAdd, onConsumeJump]);
 
+  useEffect(() => {
+    if (jumpToStats) {
+      setView("stats");
+      onConsumeStatsJump();
+    }
+  }, [jumpToStats, onConsumeStatsJump]);
+
   const budgetLeft = budgetToday - spendToday;
   const budgetPct = Math.min(100, Math.round((spendToday / budgetToday) * 100));
   const todayStr = todayDateStr();
   const todayEntries = entries
     .filter((e) => entryDateStr(e.t) === todayStr)
     .sort((a, b) => b.t - a.t);
+  const todaySavings = savings
+    .filter((e) => entryDateStr(e.t) === todayStr)
+    .sort((a, b) => b.t - a.t);
+  const todaySaved = sumSavingsForDate(savings, todayStr);
 
   const selectedCat = category ? categoryById(category) : null;
 
@@ -613,6 +650,35 @@ function LedgerScreen({ entries, setEntries, spendToday, budgetToday, jumpToAdd,
   const deleteEntry = useCallback((id) => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }, [setEntries]);
+
+  const pressSavingDigit = useCallback((d) => {
+    setSavingAmount((a) => {
+      if (d === "back") return a.slice(0, -1);
+      if (d === "." && a.includes(".")) return a;
+      if (a.includes(".") && a.split(".")[1] && a.split(".")[1].length >= 2) return a;
+      if (a === "0" && d !== ".") return d;
+      if (!a && d === ".") return "0.";
+      return a + d;
+    });
+  }, []);
+
+  const canSaveSaving = savingAmount && parseFloat(savingAmount) > 0;
+
+  const saveSaving = useCallback(() => {
+    if (!canSaveSaving) return;
+    const value = parseFloat(savingAmount);
+    setSavings((prev) => [
+      ...prev,
+      { id: "sv" + Date.now(), amount: value, t: Date.now() },
+    ]);
+    setSavingAmount("");
+    setAddingSaving(false);
+    if (navigator.vibrate) navigator.vibrate(10);
+  }, [savingAmount, canSaveSaving, setSavings]);
+
+  const deleteSaving = useCallback((id) => {
+    setSavings((prev) => prev.filter((e) => e.id !== id));
+  }, [setSavings]);
 
   return (
     <div className="page">
@@ -698,6 +764,36 @@ function LedgerScreen({ entries, setEntries, spendToday, budgetToday, jumpToAdd,
               </button>
             </div>
           </div>
+        ) : addingSaving ? (
+          <div className="ledger-pad-wrap">
+            <div className="ledger-amount-display">
+              <span className="ledger-currency">¥</span>
+              <span>{savingAmount || "0"}</span>
+              <span className="ledger-saving-tag">存钱</span>
+            </div>
+            <div className="numpad">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "back"].map((k) => (
+                <button
+                  key={k}
+                  className="numpad-key"
+                  onClick={() => pressSavingDigit(k)}
+                  aria-label={k === "back" ? "删除" : k}
+                >
+                  {k === "back" ? "⌫" : k}
+                </button>
+              ))}
+            </div>
+            <div className="ledger-actions">
+              <button className="ledger-cancel" onClick={() => { setAddingSaving(false); setSavingAmount(""); }}>取消</button>
+              <button
+                className={"ledger-save" + (canSaveSaving ? "" : " ledger-save-disabled")}
+                onClick={saveSaving}
+                disabled={!canSaveSaving}
+              >
+                存入
+              </button>
+            </div>
+          </div>
         ) : view === "list" ? (
           <>
             <div className="ledger-summary">
@@ -708,6 +804,9 @@ function LedgerScreen({ entries, setEntries, spendToday, budgetToday, jumpToAdd,
               >
                 {budgetLeft >= 0 ? `今日预算剩 ¥${budgetLeft}` : `超出预算 ¥${Math.abs(budgetLeft)}`}
               </div>
+              {todaySaved > 0 && (
+                <div className="ledger-saving-note">今日已存 ¥{formatMoney(todaySaved)}</div>
+              )}
               <div className="bar-track-tight" style={{ marginTop: 8 }}>
                 <div
                   className="bar-fill"
@@ -718,6 +817,26 @@ function LedgerScreen({ entries, setEntries, spendToday, budgetToday, jumpToAdd,
                 />
               </div>
             </div>
+
+            {todaySavings.length > 0 && (
+              <Section title="今日存钱" sub={`${todaySavings.length} 笔`}>
+                <div className="card-tasks">
+                  {todaySavings.map((e, i) => (
+                    <div
+                      key={e.id}
+                      className="ledger-row"
+                      style={{ borderTop: i === 0 ? "none" : "1px solid var(--line)" }}
+                      onClick={() => deleteSaving(e.id)}
+                    >
+                      <span className="ledger-emoji">🐷</span>
+                      <span className="ledger-label">存钱</span>
+                      <span className="ledger-time">{formatTime(e.t)}</span>
+                      <span className="ledger-amount" style={{ color: "var(--moss)" }}>¥{e.amount}</span>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            )}
 
             <Section title="今日明细" sub={`${todayEntries.length} 笔`} grow>
               <div className="card-tasks">
@@ -743,25 +862,33 @@ function LedgerScreen({ entries, setEntries, spendToday, budgetToday, jumpToAdd,
                 )}
               </div>
             </Section>
-            <button className="add-entry-button" onClick={() => setAdding(true)}>
-              + 记一笔
-            </button>
+            <div className="ledger-add-row">
+              <button className="add-entry-button" onClick={() => setAdding(true)}>
+                + 记一笔
+              </button>
+              <button className="add-entry-button add-saving-button" onClick={() => setAddingSaving(true)}>
+                + 存一笔
+              </button>
+            </div>
           </>
         ) : (
-          <StatsView entries={entries} />
+          <StatsView entries={entries} savings={savings} />
         )}
       </div>
     </div>
   );
 }
 
-function StatsView({ entries }) {
+function StatsView({ entries, savings }) {
   const [range, setRange] = useState("week"); // week | month | year
   const [expanded, setExpanded] = useState(null);
   const [viewMode, setViewMode] = useState("pie"); // pie | list
 
   const { filtered, rangeLabel } = filterEntriesByRange(entries, range);
   const total = Math.round(filtered.reduce((s, e) => s + e.amount, 0) * 100) / 100;
+  const { filtered: filteredSavings } = filterEntriesByRange(savings || [], range);
+  const totalSavings = Math.round(filteredSavings.reduce((s, e) => s + e.amount, 0) * 100) / 100;
+  const netSpent = Math.round((total - totalSavings) * 100) / 100;
 
   const byCategory = CATEGORIES.map((c) => {
     const catEntries = filtered.filter((e) => e.category === c.id);
@@ -814,7 +941,14 @@ function StatsView({ entries }) {
         <div className="stats-total-row">
           <div>
             <div className="stats-total">¥{formatMoney(total)}</div>
-            <div className="stats-total-label">{rangeLabel} · 共 {filtered.length} 笔</div>
+            <div className="stats-total-label">{rangeLabel}消费 · 共 {filtered.length} 笔</div>
+            <div className="stats-saving-compare">
+              <span>消费 ¥{formatMoney(total)}</span>
+              <span className="stats-saving-dot">·</span>
+              <span style={{ color: "var(--moss)" }}>存钱 ¥{formatMoney(totalSavings)}</span>
+              <span className="stats-saving-dot">·</span>
+              <span>净支出 ¥{formatMoney(netSpent)}</span>
+            </div>
           </div>
           <div className="view-toggle">
             <button
@@ -1573,7 +1707,7 @@ function formatDateLabel() {
   return `${d.getMonth() + 1}月${d.getDate()}日 · ${weekday}`;
 }
 
-function MeScreen({ state, setState, history, setHistory, entries, setEntries, todos, setTodos, studySessions, setStudySessions, onResetAll }) {
+function MeScreen({ state, setState, history, setHistory, entries, setEntries, todos, setTodos, studySessions, setStudySessions, savings, onResetAll }) {
   const [budgetInput, setBudgetInput] = useState(String(state.budgetToday));
   const [studyGoalInput, setStudyGoalInput] = useState(String(state.studyGoalMinutes));
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -1596,6 +1730,8 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
   const totalStudyMinutes = (studySessions || []).reduce((sum, s) => sum + s.minutes, 0);
   const totalSpend = (entries || []).reduce((sum, e) => sum + e.amount, 0);
   const totalSpendRounded = Math.round(totalSpend * 100) / 100;
+  const totalSavings = (savings || []).reduce((sum, e) => sum + e.amount, 0);
+  const totalSavingsRounded = Math.round(totalSavings * 100) / 100;
   const companionLine = meCompanionLine(totalDays);
 
   const commitBudget = () => {
@@ -1719,6 +1855,11 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
             <div className="me-stat-cell">
               <div className="me-stat-value">¥{totalSpendRounded}</div>
               <div className="me-stat-label">累计消费</div>
+            </div>
+            <div className="me-stat-divider" />
+            <div className="me-stat-cell">
+              <div className="me-stat-value" style={{ color: "var(--moss)" }}>¥{totalSavingsRounded}</div>
+              <div className="me-stat-label">累计存钱</div>
             </div>
           </div>
 
@@ -1857,9 +1998,11 @@ function App() {
   const [todos, setTodos] = useState([]);
   const [history, setHistory] = useState([]);
   const [studySessions, setStudySessions] = useState([]);
+  const [savings, setSavings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("today");
   const [jumpToAddLedger, setJumpToAddLedger] = useState(false);
+  const [jumpToStatsLedger, setJumpToStatsLedger] = useState(false);
   const [jumpToAddTodo, setJumpToAddTodo] = useState(false);
   const [showQuickSheet, setShowQuickSheet] = useState(false);
 
@@ -1869,6 +2012,7 @@ function App() {
     setTodos(loadTodos());
     setHistory(loadHistory());
     setStudySessions(loadStudySessions());
+    setSavings(loadSavings());
     setLoading(false);
   }, []);
 
@@ -1896,6 +2040,10 @@ function App() {
     setState((s) => (s ? { ...s, studyMinutes: sumStudyMinutesForDate(studySessions, todayDateStr()) } : s));
   }, [studySessions]);
 
+  useEffect(() => {
+    saveSavings(savings);
+  }, [savings]);
+
   const recordDay = useCallback((snapshot) => {
     setHistory((prev) => {
       const withoutToday = prev.filter((h) => h.date !== snapshot.date);
@@ -1909,11 +2057,13 @@ function App() {
     localStorage.removeItem(TODOS_KEY);
     localStorage.removeItem(HISTORY_KEY);
     localStorage.removeItem(STUDY_KEY);
+    localStorage.removeItem(SAVINGS_KEY);
     setState(defaultState());
     setEntries([]);
     setTodos(defaultTodos());
     setHistory([]);
     setStudySessions([]);
+    setSavings([]);
   }, []);
 
   // ---- reminder polling ----
@@ -1979,6 +2129,10 @@ function App() {
           setTodos={setTodos}
           onOpenTodo={() => setTab("todo")}
           onOpenStudy={() => setTab("study")}
+          onOpenLedgerStats={() => {
+            setTab("ledger");
+            setJumpToStatsLedger(true);
+          }}
           onRecordDay={recordDay}
         />
       )}
@@ -1986,10 +2140,14 @@ function App() {
         <LedgerScreen
           entries={entries}
           setEntries={setEntries}
+          savings={savings}
+          setSavings={setSavings}
           spendToday={state.spendToday}
           budgetToday={state.budgetToday}
           jumpToAdd={jumpToAddLedger}
+          jumpToStats={jumpToStatsLedger}
           onConsumeJump={() => setJumpToAddLedger(false)}
+          onConsumeStatsJump={() => setJumpToStatsLedger(false)}
         />
       )}
       {tab === "todo" && (
@@ -2019,6 +2177,7 @@ function App() {
           setTodos={setTodos}
           studySessions={studySessions}
           setStudySessions={setStudySessions}
+          savings={savings}
           onResetAll={resetAllData}
         />
       )}
@@ -2161,7 +2320,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     flex: 1 1 33%;
     min-width: 33%;
     text-align: center;
-    padding: 6px 0;
+    padding: 6px 4px;
   }
   .me-stat-divider {
     width: 1px;
@@ -2432,6 +2591,32 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     margin-top: 6px;
     font-size: 12.5px;
   }
+  .ledger-saving-note {
+    margin-top: 4px;
+    font-size: 12.5px;
+    color: var(--moss);
+  }
+  .ledger-saving-tag {
+    margin-left: 8px;
+    font-size: 11px;
+    color: #fff;
+    background: var(--moss);
+    padding: 2px 8px;
+    border-radius: 8px;
+    vertical-align: middle;
+  }
+  .ledger-add-row {
+    display: flex;
+    gap: 10px;
+  }
+  .ledger-add-row .add-entry-button {
+    flex: 1;
+  }
+  .add-saving-button {
+    background: var(--moss);
+    color: #fff;
+    border-color: var(--moss);
+  }
   .ledger-empty {
     padding: 28px 0;
     text-align: center;
@@ -2665,6 +2850,18 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     margin-top: 6px;
     font-size: 12px;
     color: var(--muted);
+  }
+  .stats-saving-compare {
+    margin-top: 8px;
+    font-size: 11.5px;
+    color: var(--muted);
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .stats-saving-dot {
+    color: var(--line);
   }
   .view-toggle {
     display: flex;
