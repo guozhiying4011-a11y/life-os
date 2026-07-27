@@ -196,10 +196,14 @@ const loadState = () => {
     const parsed = JSON.parse(raw);
     if (parsed.date !== todayDateStr()) {
       const streak = parsed.ended ? parsed.streak + 1 : 0;
+      // 跨天时，预算和学习目标沿用上一天的设置（而非重置为默认值）
       return {
         ...defaultState(),
         streak,
+        budgetToday: parsed.budgetToday ?? defaultState().budgetToday,
+        studyGoalMinutes: parsed.studyGoalMinutes ?? defaultState().studyGoalMinutes,
         spendToday: sumEntriesForDate(loadEntries(), todayDateStr()),
+        studyMinutes: sumStudyMinutesForDate(loadStudySessions(), todayDateStr()),
       };
     }
     return { ...defaultState(), ...parsed, spendToday: sumEntriesForDate(loadEntries(), todayDateStr()) };
