@@ -277,6 +277,40 @@ const saveStudySessions = (sessions) => {
 const sumStudyMinutesForDate = (sessions, dateStr) =>
   sessions.filter((s) => entryDateStr(s.t) === dateStr).reduce((sum, s) => sum + s.minutes, 0);
 
+// 起始日期工具：返回本周一 / 本月初 / 本年初 的 YYYY-MM-DD
+const startOfWeekStr = () => {
+  const d = new Date();
+  const day = d.getDay() || 7; // 周日=7
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - day + 1);
+  monday.setHours(0, 0, 0, 0);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, "0")}-${String(monday.getDate()).padStart(2, "0")}`;
+};
+const startOfMonthStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+};
+const startOfYearStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-01-01`;
+};
+
+const sumStudyMinutesSince = (sessions, dateStr) =>
+  sessions.filter((s) => entryDateStr(s.t) >= dateStr).reduce((sum, s) => sum + s.minutes, 0);
+
+const sumEntriesSince = (entries, dateStr) =>
+  Math.round(
+    entries.filter((e) => entryDateStr(e.t) >= dateStr).reduce((sum, e) => sum + e.amount, 0) * 100
+  ) / 100;
+
+const formatHours = (minutes) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}分`;
+  if (m === 0) return `${h}时`;
+  return `${h}时${m}分`;
+};
+
 
 function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy, onRecordDay }) {
   const [holdProgress, setHoldProgress] = useState(0);
@@ -990,6 +1024,10 @@ function StudyScreen({ sessions, setSessions, studyGoalMinutes }) {
     .sort((a, b) => b.t - a.t);
   const goalPct = Math.min(100, Math.round((todayMinutes / studyGoalMinutes) * 100));
 
+  const weekMinutes = sumStudyMinutesSince(sessions, startOfWeekStr());
+  const monthMinutes = sumStudyMinutesSince(sessions, startOfMonthStr());
+  const yearMinutes = sumStudyMinutesSince(sessions, startOfYearStr());
+
   useEffect(() => {
     if (running) {
       startRef.current = Date.now() - elapsedSec * 1000;
@@ -1050,6 +1088,23 @@ function StudyScreen({ sessions, setSessions, studyGoalMinutes }) {
 
         <div className="bar-track-tight" style={{ margin: "16px 0 4px" }}>
           <div className="bar-fill" style={{ width: `${goalPct}%` }} />
+        </div>
+
+        <div className="study-stat-strip">
+          <div className="study-stat-cell">
+            <div className="study-stat-value">{formatHours(weekMinutes)}</div>
+            <div className="study-stat-label">本周</div>
+          </div>
+          <div className="study-stat-divider" />
+          <div className="study-stat-cell">
+            <div className="study-stat-value">{formatHours(monthMinutes)}</div>
+            <div className="study-stat-label">本月</div>
+          </div>
+          <div className="study-stat-divider" />
+          <div className="study-stat-cell">
+            <div className="study-stat-value">{formatHours(yearMinutes)}</div>
+            <div className="study-stat-label">本年</div>
+          </div>
         </div>
 
         <div className="scrollless" style={{ marginTop: 8 }}>
@@ -1534,6 +1589,9 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
   const totalDays = history.length;
   const totalGrowth = history.reduce((sum, h) => sum + (h.growth || 0), 0);
   const longestStreak = computeLongestStreak(history);
+  const totalStudyMinutes = (studySessions || []).reduce((sum, s) => sum + s.minutes, 0);
+  const totalSpend = (entries || []).reduce((sum, e) => sum + e.amount, 0);
+  const totalSpendRounded = Math.round(totalSpend * 100) / 100;
   const companionLine = meCompanionLine(totalDays);
 
   const commitBudget = () => {
@@ -1647,6 +1705,16 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
             <div className="me-stat-cell">
               <div className="me-stat-value">{totalGrowth}</div>
               <div className="me-stat-label">累计成长值</div>
+            </div>
+            <div className="me-stat-divider-row" />
+            <div className="me-stat-cell">
+              <div className="me-stat-value">{formatHours(totalStudyMinutes)}</div>
+              <div className="me-stat-label">总学习时长</div>
+            </div>
+            <div className="me-stat-divider" />
+            <div className="me-stat-cell">
+              <div className="me-stat-value">¥{totalSpendRounded}</div>
+              <div className="me-stat-label">累计消费</div>
             </div>
           </div>
 
@@ -2077,6 +2145,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   /* ---- Stat strip ---- */
   .me-stat-strip {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     background: #fff;
     border-radius: 16px;
@@ -2085,13 +2154,21 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     margin-bottom: 22px;
   }
   .me-stat-cell {
-    flex: 1;
+    flex: 1 1 33%;
+    min-width: 33%;
     text-align: center;
+    padding: 6px 0;
   }
   .me-stat-divider {
     width: 1px;
     align-self: stretch;
     background: var(--line);
+  }
+  .me-stat-divider-row {
+    width: 100%;
+    height: 1px;
+    background: var(--line);
+    margin: 4px 12px;
   }
   .me-stat-value {
     font-size: 21px;
@@ -2860,6 +2937,34 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   }
   .study-run-button-active {
     background: var(--clay);
+  }
+  .study-stat-strip {
+    display: flex;
+    align-items: center;
+    background: #fff;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    padding: 14px 4px;
+    margin: 12px 0 4px;
+  }
+  .study-stat-cell {
+    flex: 1;
+    text-align: center;
+  }
+  .study-stat-divider {
+    width: 1px;
+    align-self: stretch;
+    background: var(--line);
+  }
+  .study-stat-value {
+    font-size: 17px;
+    font-family: Georgia, "Songti SC", serif;
+    color: var(--moss);
+  }
+  .study-stat-label {
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 4px;
   }
   .manual-study-row {
     display: flex;
