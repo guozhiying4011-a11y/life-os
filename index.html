@@ -1510,11 +1510,14 @@ function formatDateLabel() {
   return `${d.getMonth() + 1}月${d.getDate()}日 · ${weekday}`;
 }
 
-function MeScreen({ state, setState, history, entries, todos, onResetAll }) {
+function MeScreen({ state, setState, history, setHistory, entries, setEntries, todos, setTodos, studySessions, setStudySessions, onResetAll }) {
   const [budgetInput, setBudgetInput] = useState(String(state.budgetToday));
   const [studyGoalInput, setStudyGoalInput] = useState(String(state.studyGoalMinutes));
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [exportDone, setExportDone] = useState(false);
+  const [importDone, setImportDone] = useState(false);
+  const [importError, setImportError] = useState("");
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     setBudgetInput(String(state.budgetToday));
@@ -1554,6 +1557,7 @@ function MeScreen({ state, setState, history, entries, todos, onResetAll }) {
       entries,
       todos,
       history,
+      studySessions,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1566,6 +1570,41 @@ function MeScreen({ state, setState, history, entries, todos, onResetAll }) {
     URL.revokeObjectURL(url);
     setExportDone(true);
     setTimeout(() => setExportDone(false), 2000);
+  };
+
+  const importData = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setImportError("");
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (parsed.state && typeof parsed.state === "object") {
+          setState({ ...defaultState(), ...parsed.state });
+        }
+        if (Array.isArray(parsed.entries)) setEntries(parsed.entries);
+        if (Array.isArray(parsed.todos)) setTodos(parsed.todos);
+        if (Array.isArray(parsed.history)) setHistory(parsed.history);
+        if (Array.isArray(parsed.studySessions)) setStudySessions(parsed.studySessions);
+        setImportDone(true);
+        setTimeout(() => setImportDone(false), 2500);
+      } catch (err) {
+        setImportError("文件格式错误");
+        setTimeout(() => setImportError(""), 3000);
+      }
+      // reset so same file can be picked again
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+    reader.onerror = () => {
+      setImportError("读取失败");
+      setTimeout(() => setImportError(""), 3000);
+    };
+    reader.readAsText(file);
+  };
+
+  const triggerImport = () => {
+    if (fileInputRef.current) fileInputRef.current.click();
   };
 
   const handleReset = () => {
@@ -1645,6 +1684,23 @@ function MeScreen({ state, setState, history, entries, todos, onResetAll }) {
               <span className="me-list-row-label">⬇️ 导出数据</span>
               <span className="me-list-row-chevron">{exportDone ? "已导出 ✓" : "›"}</span>
             </div>
+            <div
+              className="me-list-row me-list-row-action"
+              style={{ borderTop: "1px solid var(--line)" }}
+              onClick={triggerImport}
+            >
+              <span className="me-list-row-label">⬆️ 导入数据</span>
+              <span className="me-list-row-chevron">
+                {importError ? importError : importDone ? "已导入 ✓" : "›"}
+              </span>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: "none" }}
+              onChange={importData}
+            />
             <div
               className="me-list-row me-list-row-action"
               style={{ borderTop: "1px solid var(--line)" }}
@@ -1880,8 +1936,13 @@ function App() {
           state={state}
           setState={setState}
           history={history}
+          setHistory={setHistory}
           entries={entries}
+          setEntries={setEntries}
           todos={todos}
+          setTodos={setTodos}
+          studySessions={studySessions}
+          setStudySessions={setStudySessions}
           onResetAll={resetAllData}
         />
       )}
