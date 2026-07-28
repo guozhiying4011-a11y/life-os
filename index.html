@@ -196,11 +196,17 @@ const loadState = () => {
     const parsed = JSON.parse(raw);
     if (parsed.date !== todayDateStr()) {
       const streak = parsed.ended ? parsed.streak + 1 : 0;
-      // 跨天时，预算和学习目标沿用上一天的设置（而非重置为默认值）
+      // 跨天时，把"昨日预算 - 昨日消费"累加到可支配额度
+      const yesterdayBudget = parsed.budgetToday ?? defaultState().budgetToday;
+      const yesterdaySpend = parsed.spendToday ?? 0;
+      const dayDelta = Math.round((yesterdayBudget - yesterdaySpend) * 100) / 100;
+      const newBalance = Math.round((loadBalance() + dayDelta) * 100) / 100;
+      saveBalance(newBalance);
+      // 预算和学习目标沿用上一天的设置（而非重置为默认值）
       return {
         ...defaultState(),
         streak,
-        budgetToday: parsed.budgetToday ?? defaultState().budgetToday,
+        budgetToday: yesterdayBudget,
         studyGoalMinutes: parsed.studyGoalMinutes ?? defaultState().studyGoalMinutes,
         spendToday: sumEntriesForDate(loadEntries(), todayDateStr()),
         studyMinutes: sumStudyMinutesForDate(loadStudySessions(), todayDateStr()),
@@ -331,6 +337,22 @@ const sumSavingsSince = (savings, dateStr) =>
     savings.filter((e) => entryDateStr(e.t) >= dateStr).reduce((sum, e) => sum + e.amount, 0) * 100
   ) / 100;
 
+// ---------- budget balance (累计可支配额度) ----------
+const BALANCE_KEY = "budget-balance";
+const loadBalance = () => {
+  try {
+    const raw = localStorage.getItem(BALANCE_KEY);
+    return raw ? parseFloat(raw) || 0 : 0;
+  } catch (e) {
+    return 0;
+  }
+};
+const saveBalance = (bal) => {
+  try {
+    localStorage.setItem(BALANCE_KEY, String(bal));
+  } catch (e) {}
+};
+
 const formatHours = (minutes) => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -340,7 +362,7 @@ const formatHours = (minutes) => {
 };
 
 
-function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy, onOpenLedgerStats, onRecordDay }) {
+function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy, onOpenLedgerStats, onRecordDay, availableBalance }) {
   const [holdProgress, setHoldProgress] = useState(0);
   const [holding, setHolding] = useState(false);
 
@@ -469,6 +491,12 @@ function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy
                     }}
                   />
                 </div>
+                <div className="balance-row">
+                  <span className="balance-label">可支配额度</span>
+                  <span className="balance-value" style={{ color: availableBalance >= 0 ? "var(--moss)" : "var(--clay)" }}>
+                    {availableBalance >= 0 ? "¥" + availableBalance : "-¥" + Math.abs(availableBalance)}
+                  </span>
+                </div>
               </div>
             </Section>
 
@@ -568,7 +596,7 @@ function Section({ title, sub, children, grow, onSubClick }) {
   );
 }
 
-function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, budgetToday, jumpToAdd, jumpToStats, onConsumeJump, onConsumeStatsJump }) {
+function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, budgetToday, availableBalance, jumpToAdd, jumpToStats, onConsumeJump, onConsumeStatsJump }) {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState(null);
   const [subCategory, setSubCategory] = useState(null);
@@ -815,6 +843,12 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
                     background: budgetLeft >= 0 ? "var(--moss)" : "var(--clay)",
                   }}
                 />
+              </div>
+              <div className="balance-row" style={{ marginTop: 8 }}>
+                <span className="balance-label">可支配额度</span>
+                <span className="balance-value" style={{ color: availableBalance >= 0 ? "var(--moss)" : "var(--clay)" }}>
+                  {availableBalance >= 0 ? "¥" + availableBalance : "-¥" + Math.abs(availableBalance)}
+                </span>
               </div>
             </div>
 
@@ -1707,7 +1741,7 @@ function formatDateLabel() {
   return `${d.getMonth() + 1}月${d.getDate()}日 · ${weekday}`;
 }
 
-function MeScreen({ state, setState, history, setHistory, entries, setEntries, todos, setTodos, studySessions, setStudySessions, savings, setSavings, onResetAll }) {
+function MeScreen({ state, setState, history, setHistory, entries, setEntries, todos, setTodos, studySessions, setStudySessions, savings, setSavings, availableBalance, budgetBalance, setBudgetBalance, onResetAll }) {
   const [budgetInput, setBudgetInput] = useState(String(state.budgetToday));
   const [studyGoalInput, setStudyGoalInput] = useState(String(state.studyGoalMinutes));
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -1762,6 +1796,7 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
       history,
       studySessions,
       savings,
+      budgetBalance,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1792,6 +1827,10 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
         if (Array.isArray(parsed.history)) setHistory(parsed.history);
         if (Array.isArray(parsed.studySessions)) setStudySessions(parsed.studySessions);
         if (Array.isArray(parsed.savings)) setSavings(parsed.savings);
+        if (typeof parsed.budgetBalance === "number") {
+          setBudgetBalance(parsed.budgetBalance);
+          saveBalance(parsed.budgetBalance);
+        }
         setImportDone(true);
         setTimeout(() => setImportDone(false), 2500);
       } catch (err) {
@@ -1832,24 +1871,23 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
             </div>
             <div className="me-hero-name">Gniy</div>
             <div className="me-hero-line">{companionLine}</div>
+            <div className="me-hero-stats">
+              <div className="me-hero-stat">
+                <div className="me-hero-stat-value">{totalDays}</div>
+                <div className="me-hero-stat-label">总完成</div>
+              </div>
+              <div className="me-hero-stat">
+                <div className="me-hero-stat-value">{longestStreak}</div>
+                <div className="me-hero-stat-label">最长连续</div>
+              </div>
+              <div className="me-hero-stat">
+                <div className="me-hero-stat-value">{totalGrowth}</div>
+                <div className="me-hero-stat-label">成长值</div>
+              </div>
+            </div>
           </div>
 
           <div className="me-stat-strip">
-            <div className="me-stat-cell">
-              <div className="me-stat-value">{totalDays}</div>
-              <div className="me-stat-label">总完成天数</div>
-            </div>
-            <div className="me-stat-divider" />
-            <div className="me-stat-cell">
-              <div className="me-stat-value">{longestStreak}</div>
-              <div className="me-stat-label">最长连续</div>
-            </div>
-            <div className="me-stat-divider" />
-            <div className="me-stat-cell">
-              <div className="me-stat-value">{totalGrowth}</div>
-              <div className="me-stat-label">累计成长值</div>
-            </div>
-            <div className="me-stat-divider-row" />
             <div className="me-stat-cell">
               <div className="me-stat-value">{formatHours(totalStudyMinutes)}</div>
               <div className="me-stat-label">总学习时长</div>
@@ -1863,6 +1901,13 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
             <div className="me-stat-cell">
               <div className="me-stat-value" style={{ color: totalSavingsRounded >= 0 ? "var(--moss)" : "var(--clay)" }}>¥{totalSavingsRounded}</div>
               <div className="me-stat-label">累计存钱</div>
+            </div>
+            <div className="me-stat-divider" />
+            <div className="me-stat-cell">
+              <div className="me-stat-value" style={{ color: availableBalance >= 0 ? "var(--moss)" : "var(--clay)" }}>
+                {availableBalance >= 0 ? "¥" + availableBalance : "-¥" + Math.abs(availableBalance)}
+              </div>
+              <div className="me-stat-label">可支配额度</div>
             </div>
           </div>
 
@@ -2002,6 +2047,7 @@ function App() {
   const [history, setHistory] = useState([]);
   const [studySessions, setStudySessions] = useState([]);
   const [savings, setSavings] = useState([]);
+  const [budgetBalance, setBudgetBalance] = useState(0);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("today");
   const [jumpToAddLedger, setJumpToAddLedger] = useState(false);
@@ -2016,6 +2062,7 @@ function App() {
     setHistory(loadHistory());
     setStudySessions(loadStudySessions());
     setSavings(loadSavings());
+    setBudgetBalance(loadBalance());
     setLoading(false);
   }, []);
 
@@ -2047,6 +2094,11 @@ function App() {
     saveSavings(savings);
   }, [savings]);
 
+  // 实时可支配额度 = 累计结余 + (今日预算 - 今日消费)
+  const availableBalance = state
+    ? Math.round((budgetBalance + (state.budgetToday - state.spendToday)) * 100) / 100
+    : 0;
+
   const recordDay = useCallback((snapshot) => {
     setHistory((prev) => {
       const withoutToday = prev.filter((h) => h.date !== snapshot.date);
@@ -2061,12 +2113,14 @@ function App() {
     localStorage.removeItem(HISTORY_KEY);
     localStorage.removeItem(STUDY_KEY);
     localStorage.removeItem(SAVINGS_KEY);
+    localStorage.removeItem(BALANCE_KEY);
     setState(defaultState());
     setEntries([]);
     setTodos(defaultTodos());
     setHistory([]);
     setStudySessions([]);
     setSavings([]);
+    setBudgetBalance(0);
   }, []);
 
   // ---- reminder polling ----
@@ -2137,6 +2191,7 @@ function App() {
             setJumpToStatsLedger(true);
           }}
           onRecordDay={recordDay}
+          availableBalance={availableBalance}
         />
       )}
       {tab === "ledger" && (
@@ -2147,6 +2202,7 @@ function App() {
           setSavings={setSavings}
           spendToday={state.spendToday}
           budgetToday={state.budgetToday}
+          availableBalance={availableBalance}
           jumpToAdd={jumpToAddLedger}
           jumpToStats={jumpToStatsLedger}
           onConsumeJump={() => setJumpToAddLedger(false)}
@@ -2182,6 +2238,9 @@ function App() {
           setStudySessions={setStudySessions}
           savings={savings}
           setSavings={setSavings}
+          availableBalance={availableBalance}
+          budgetBalance={budgetBalance}
+          setBudgetBalance={setBudgetBalance}
           onResetAll={resetAllData}
         />
       )}
@@ -2308,11 +2367,56 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     color: rgba(255,255,255,0.75);
     margin-top: 4px;
   }
+  .me-hero-stats {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .me-hero-stat {
+    background: rgba(255,255,255,0.15);
+    border-radius: 50%;
+    width: 64px;
+    height: 64px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .me-hero-stat-value {
+    font-size: 17px;
+    font-family: Georgia, "Songti SC", serif;
+    color: #fff;
+    line-height: 1;
+  }
+  .me-hero-stat-label {
+    font-size: 9.5px;
+    color: rgba(255,255,255,0.8);
+    margin-top: 3px;
+  }
+  .balance-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+  .balance-label {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .balance-value {
+    font-size: 15px;
+    font-weight: 600;
+    font-family: Georgia, "Songti SC", serif;
+  }
 
   /* ---- Stat strip ---- */
   .me-stat-strip {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     background: #fff;
     border-radius: 16px;
@@ -2321,29 +2425,23 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     margin-bottom: 22px;
   }
   .me-stat-cell {
-    flex: 1 1 33%;
-    min-width: 33%;
+    flex: 1 1 25%;
+    min-width: 25%;
     text-align: center;
-    padding: 6px 4px;
+    padding: 6px 2px;
   }
   .me-stat-divider {
     width: 1px;
     align-self: stretch;
     background: var(--line);
   }
-  .me-stat-divider-row {
-    width: 100%;
-    height: 1px;
-    background: var(--line);
-    margin: 4px 12px;
-  }
   .me-stat-value {
-    font-size: 21px;
+    font-size: 18px;
     font-family: Georgia, "Songti SC", serif;
     color: var(--ink);
   }
   .me-stat-label {
-    font-size: 10.5px;
+    font-size: 10px;
     color: var(--muted);
     margin-top: 4px;
   }
