@@ -307,7 +307,7 @@ const sumEntriesSince = (entries, dateStr) =>
     entries.filter((e) => entryDateStr(e.t) >= dateStr).reduce((sum, e) => sum + e.amount, 0) * 100
   ) / 100;
 
-// ---------- savings (存钱) ----------
+// ---------- savings (收入/存钱) ----------
 const SAVINGS_KEY = "savings-entries";
 const loadSavings = () => {
   try {
@@ -769,7 +769,7 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
             <div className="ledger-amount-display">
               <span className="ledger-currency">¥</span>
               <span>{savingAmount || "0"}</span>
-              <span className="ledger-saving-tag">存钱</span>
+              <span className="ledger-saving-tag">收入</span>
             </div>
             <div className="numpad">
               {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "back"].map((k) => (
@@ -805,7 +805,7 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
                 {budgetLeft >= 0 ? `今日预算剩 ¥${budgetLeft}` : `超出预算 ¥${Math.abs(budgetLeft)}`}
               </div>
               {todaySaved > 0 && (
-                <div className="ledger-saving-note">今日已存 ¥{formatMoney(todaySaved)}</div>
+                <div className="ledger-saving-note">今日收入 ¥{formatMoney(todaySaved)}</div>
               )}
               <div className="bar-track-tight" style={{ marginTop: 8 }}>
                 <div
@@ -819,7 +819,7 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
             </div>
 
             {todaySavings.length > 0 && (
-              <Section title="今日存钱" sub={`${todaySavings.length} 笔`}>
+              <Section title="今日收入" sub={`${todaySavings.length} 笔`}>
                 <div className="card-tasks">
                   {todaySavings.map((e, i) => (
                     <div
@@ -828,8 +828,8 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
                       style={{ borderTop: i === 0 ? "none" : "1px solid var(--line)" }}
                       onClick={() => deleteSaving(e.id)}
                     >
-                      <span className="ledger-emoji">🐷</span>
-                      <span className="ledger-label">存钱</span>
+                      <span className="ledger-emoji">💰</span>
+                      <span className="ledger-label">收入</span>
                       <span className="ledger-time">{formatTime(e.t)}</span>
                       <span className="ledger-amount" style={{ color: "var(--moss)" }}>¥{e.amount}</span>
                     </div>
@@ -867,7 +867,7 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
                 + 记一笔
               </button>
               <button className="add-entry-button add-saving-button" onClick={() => setAddingSaving(true)}>
-                + 存一笔
+                + 记一笔收入
               </button>
             </div>
           </>
@@ -887,8 +887,8 @@ function StatsView({ entries, savings }) {
   const { filtered, rangeLabel } = filterEntriesByRange(entries, range);
   const total = Math.round(filtered.reduce((s, e) => s + e.amount, 0) * 100) / 100;
   const { filtered: filteredSavings } = filterEntriesByRange(savings || [], range);
-  const totalSavings = Math.round(filteredSavings.reduce((s, e) => s + e.amount, 0) * 100) / 100;
-  const netSpent = Math.round((total - totalSavings) * 100) / 100;
+  const totalIncome = Math.round(filteredSavings.reduce((s, e) => s + e.amount, 0) * 100) / 100;
+  const savedMoney = Math.round((totalIncome - total) * 100) / 100; // 扣掉消费后剩余
 
   const byCategory = CATEGORIES.map((c) => {
     const catEntries = filtered.filter((e) => e.category === c.id);
@@ -945,9 +945,9 @@ function StatsView({ entries, savings }) {
             <div className="stats-saving-compare">
               <span>消费 ¥{formatMoney(total)}</span>
               <span className="stats-saving-dot">·</span>
-              <span style={{ color: "var(--moss)" }}>存钱 ¥{formatMoney(totalSavings)}</span>
+              <span style={{ color: "var(--moss)" }}>收入 ¥{formatMoney(totalIncome)}</span>
               <span className="stats-saving-dot">·</span>
-              <span>净支出 ¥{formatMoney(netSpent)}</span>
+              <span style={{ color: savedMoney >= 0 ? "var(--moss)" : "var(--clay)" }}>存钱 ¥{formatMoney(savedMoney)}</span>
             </div>
           </div>
           <div className="view-toggle">
@@ -1730,7 +1730,8 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
   const totalStudyMinutes = (studySessions || []).reduce((sum, s) => sum + s.minutes, 0);
   const totalSpend = (entries || []).reduce((sum, e) => sum + e.amount, 0);
   const totalSpendRounded = Math.round(totalSpend * 100) / 100;
-  const totalSavings = (savings || []).reduce((sum, e) => sum + e.amount, 0);
+  const totalIncome = (savings || []).reduce((sum, e) => sum + e.amount, 0);
+  const totalSavings = totalIncome - totalSpend;
   const totalSavingsRounded = Math.round(totalSavings * 100) / 100;
   const companionLine = meCompanionLine(totalDays);
 
@@ -1860,7 +1861,7 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
             </div>
             <div className="me-stat-divider" />
             <div className="me-stat-cell">
-              <div className="me-stat-value" style={{ color: "var(--moss)" }}>¥{totalSavingsRounded}</div>
+              <div className="me-stat-value" style={{ color: totalSavingsRounded >= 0 ? "var(--moss)" : "var(--clay)" }}>¥{totalSavingsRounded}</div>
               <div className="me-stat-label">累计存钱</div>
             </div>
           </div>
