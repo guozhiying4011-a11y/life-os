@@ -353,6 +353,50 @@ const saveBalance = (bal) => {
   } catch (e) {}
 };
 
+// 回算历史结余：从第一条消费记录开始，把过去每天的"预算-消费"累加到 balance
+// 只执行一次，用 budget-balance-backfilled 标记
+const BACKFILL_KEY = "budget-balance-backfilled";
+const backfillBalance = (entries, dailyBudget) => {
+  try {
+    if (localStorage.getItem(BACKFILL_KEY)) return loadBalance();
+    if (!entries || entries.length === 0) {
+      localStorage.setItem(BACKFILL_KEY, "1");
+      return loadBalance();
+    }
+    const today = todayDateStr();
+    // 收集所有过去日期（不含今天）
+    const dates = new Set();
+    entries.forEach((e) => {
+      const ds = entryDateStr(e.t);
+      if (ds < today) dates.add(ds);
+    });
+    if (dates.size === 0) {
+      localStorage.setItem(BACKFILL_KEY, "1");
+      return loadBalance();
+    }
+    // 按日期汇总每天消费
+    const spendByDate = {};
+    entries.forEach((e) => {
+      const ds = entryDateStr(e.t);
+      if (ds < today) {
+        spendByDate[ds] = (spendByDate[ds] || 0) + e.amount;
+      }
+    });
+    // 累加每天的结余
+    let bal = loadBalance();
+    Object.keys(spendByDate).forEach((ds) => {
+      const daySpend = spendByDate[ds] || 0;
+      bal += dailyBudget - daySpend;
+    });
+    bal = Math.round(bal * 100) / 100;
+    saveBalance(bal);
+    localStorage.setItem(BACKFILL_KEY, "1");
+    return bal;
+  } catch (e) {
+    return loadBalance();
+  }
+};
+
 const formatHours = (minutes) => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -1830,6 +1874,11 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
         if (typeof parsed.budgetBalance === "number") {
           setBudgetBalance(parsed.budgetBalance);
           saveBalance(parsed.budgetBalance);
+        } else {
+          // 旧备份没有 budgetBalance，重新回算
+          localStorage.removeItem(BACKFILL_KEY);
+          const bal = backfillBalance(parsed.entries || [], (parsed.state?.budgetToday) ?? defaultState().budgetToday);
+          setBudgetBalance(bal);
         }
         setImportDone(true);
         setTimeout(() => setImportDone(false), 2500);
@@ -2056,13 +2105,18 @@ function App() {
   const [showQuickSheet, setShowQuickSheet] = useState(false);
 
   useEffect(() => {
-    setState(loadState());
-    setEntries(loadEntries());
+    const loadedState = loadState();
+    setState(loadedState);
+    const loadedEntries = loadEntries();
+    setEntries(loadedEntries);
     setTodos(loadTodos());
     setHistory(loadHistory());
     setStudySessions(loadStudySessions());
     setSavings(loadSavings());
-    setBudgetBalance(loadBalance());
+    // 回算历史结余（只执行一次），用当前预算作为每日预算
+    const dailyBudget = loadedState?.budgetToday ?? defaultState().budgetToday;
+    const backfilledBalance = backfillBalance(loadedEntries, dailyBudget);
+    setBudgetBalance(backfilledBalance);
     setLoading(false);
   }, []);
 
@@ -2114,6 +2168,7 @@ function App() {
     localStorage.removeItem(STUDY_KEY);
     localStorage.removeItem(SAVINGS_KEY);
     localStorage.removeItem(BALANCE_KEY);
+    localStorage.removeItem(BACKFILL_KEY);
     setState(defaultState());
     setEntries([]);
     setTodos(defaultTodos());
