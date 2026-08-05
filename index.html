@@ -647,6 +647,8 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
   const [adding, setAdding] = useState(false);
   const [addingSaving, setAddingSaving] = useState(false);
   const [savingAmount, setSavingAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [savingNote, setSavingNote] = useState("");
   const [view, setView] = useState("list"); // list | stats
   const [listDate, setListDate] = useState(todayDateStr());
 
@@ -698,6 +700,7 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
     setAmount("");
     setCategory(null);
     setSubCategory(null);
+    setNote("");
     setAdding(false);
   };
 
@@ -716,13 +719,14 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
         emoji: cat.emoji,
         subCategory: sub ? sub.id : null,
         subLabel: sub ? sub.label : null,
+        note: note.trim() || null,
         t: Date.now(),
       },
     ]);
     resetPad();
     setListDate(todayDateStr());
     if (navigator.vibrate) navigator.vibrate(10);
-  }, [amount, category, subCategory, canSave, setEntries]);
+  }, [amount, category, subCategory, note, canSave, setEntries]);
 
   const deleteEntry = useCallback((id) => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
@@ -746,13 +750,14 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
     const value = parseFloat(savingAmount);
     setSavings((prev) => [
       ...prev,
-      { id: "sv" + Date.now(), amount: value, t: Date.now() },
+      { id: "sv" + Date.now(), amount: value, note: savingNote.trim() || null, t: Date.now() },
     ]);
     setSavingAmount("");
+    setSavingNote("");
     setAddingSaving(false);
     setListDate(todayDateStr());
     if (navigator.vibrate) navigator.vibrate(10);
-  }, [savingAmount, canSaveSaving, setSavings]);
+  }, [savingAmount, savingNote, canSaveSaving, setSavings]);
 
   const deleteSaving = useCallback((id) => {
     setSavings((prev) => prev.filter((e) => e.id !== id));
@@ -818,6 +823,15 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
               </div>
             )}
 
+            <input
+              className="ledger-note-input"
+              type="text"
+              placeholder="备注（可选）"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              maxLength={50}
+            />
+
             <div className="numpad">
               {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "back"].map((k) => (
                 <button
@@ -849,6 +863,14 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
               <span>{savingAmount || "0"}</span>
               <span className="ledger-saving-tag">收入</span>
             </div>
+            <input
+              className="ledger-note-input"
+              type="text"
+              placeholder="备注（可选）"
+              value={savingNote}
+              onChange={(e) => setSavingNote(e.target.value)}
+              maxLength={50}
+            />
             <div className="numpad">
               {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "back"].map((k) => (
                 <button
@@ -862,7 +884,7 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
               ))}
             </div>
             <div className="ledger-actions">
-              <button className="ledger-cancel" onClick={() => { setAddingSaving(false); setSavingAmount(""); }}>取消</button>
+              <button className="ledger-cancel" onClick={() => { setAddingSaving(false); setSavingAmount(""); setSavingNote(""); }}>取消</button>
               <button
                 className={"ledger-save" + (canSaveSaving ? "" : " ledger-save-disabled")}
                 onClick={saveSaving}
@@ -935,7 +957,10 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
                       onClick={() => deleteSaving(e.id)}
                     >
                       <span className="ledger-emoji">💰</span>
-                      <span className="ledger-label">收入</span>
+                      <span className="ledger-label">
+                        <span>收入</span>
+                        {e.note && <span className="ledger-note">{e.note}</span>}
+                      </span>
                       <span className="ledger-time">{formatTime(e.t)}</span>
                       <span className="ledger-amount" style={{ color: "var(--moss)" }}>¥{e.amount}</span>
                     </div>
@@ -958,8 +983,11 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
                     >
                       <span className="ledger-emoji">{e.emoji}</span>
                       <span className="ledger-label">
-                        {e.label}
-                        {e.subLabel && <span className="ledger-sublabel"> · {e.subLabel}</span>}
+                        <span>
+                          {e.label}
+                          {e.subLabel && <span className="ledger-sublabel"> · {e.subLabel}</span>}
+                        </span>
+                        {e.note && <span className="ledger-note">{e.note}</span>}
                       </span>
                       <span className="ledger-time">{formatTime(e.t)}</span>
                       <span className="ledger-amount">¥{e.amount}</span>
@@ -2874,7 +2902,23 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     cursor: pointer;
   }
   .ledger-emoji { font-size: 16px; }
-  .ledger-label { flex: 1; font-size: 14px; color: var(--ink); }
+  .ledger-label { flex: 1; font-size: 14px; color: var(--ink); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ledger-note { font-size: 11.5px; color: var(--muted); font-weight: 400; word-break: break-word; }
+  .ledger-note-input {
+    flex: 0 0 auto;
+    width: 100%;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 12px;
+    padding: 11px 14px;
+    margin-bottom: 8px;
+    outline: none;
+  }
+  .ledger-note-input:focus { border-color: var(--moss); }
+  .ledger-note-input::placeholder { color: var(--muted); }
   .ledger-time { font-size: 11.5px; color: var(--muted); }
   .ledger-amount { font-size: 14px; color: var(--ink); font-weight: 500; min-width: 52px; text-align: right; }
 
