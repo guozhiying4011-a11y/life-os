@@ -558,7 +558,7 @@ function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy
                     className="card-value-muted"
                     style={{ color: budgetLeft >= 0 ? "var(--muted)" : "var(--clay)" }}
                   >
-                    {budgetLeft >= 0 ? `预算剩 ¥${budgetLeft} ›` : `超出预算 ¥${Math.abs(budgetLeft)} ›`}
+                    {budgetLeft >= 0 ? `预算剩 ¥${formatBalance(budgetLeft)} ›` : `超出预算 ¥${formatBalance(Math.abs(budgetLeft))} ›`}
                   </span>
                 </div>
                 <div className="bar-track-tight">
@@ -966,7 +966,7 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
                 className="ledger-budget-note"
                 style={{ color: budgetLeft >= 0 ? "var(--muted)" : "var(--clay)" }}
               >
-                {budgetLeft >= 0 ? `今日预算剩 ¥${budgetLeft}` : `超出预算 ¥${Math.abs(budgetLeft)}`}
+                {budgetLeft >= 0 ? `今日预算剩 ¥${formatBalance(budgetLeft)}` : `超出预算 ¥${formatBalance(Math.abs(budgetLeft))}`}
               </div>
               {todaySaved > 0 && (
                 <div className="ledger-saving-note">今日收入 ¥{formatMoney(todaySaved)}</div>
@@ -1962,7 +1962,7 @@ function EndedSummary({ state, doneCount, totalCount, completion, studyPct, budg
       <div className="summary-row">
         <span className="summary-label">今日消费</span>
         <span className="summary-value">
-          ¥{state.spendToday} {budgetLeft >= 0 ? `（剩 ¥${budgetLeft}）` : `（超 ¥${-budgetLeft}）`}
+          ¥{state.spendToday} {budgetLeft >= 0 ? `（剩 ¥${formatBalance(budgetLeft)}）` : `（超 ¥${formatBalance(-budgetLeft)}）`}
         </span>
       </div>
       <div className="summary-divider" />
