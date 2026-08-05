@@ -704,6 +704,69 @@ function Section({ title, sub, children, grow, onSubClick }) {
   );
 }
 
+// 左滑显示删除按钮的行容器：防止误触整行点击删除
+// 用法：<SwipeRow onDelete={...} borderTop><div className="ledger-row">...</div></SwipeRow>
+function SwipeRow({ children, onDelete, ariaLabel, borderTop }) {
+  const [offset, setOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startOffsetRef = useRef(0);
+  const OPEN = -76; // 露出删除按钮的位移
+
+  const setDrag = (v) => {
+    draggingRef.current = v;
+    setDragging(v);
+  };
+  const onPointerDown = (e) => {
+    setDrag(true);
+    startXRef.current = e.clientX;
+    startOffsetRef.current = offset;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  const onPointerMove = (e) => {
+    if (!draggingRef.current) return;
+    let next = startOffsetRef.current + (e.clientX - startXRef.current);
+    if (next > 0) next = 0; // 不允许右滑
+    if (next < OPEN - 30) next = OPEN - 30; // 最多拉到按钮外一点
+    setOffset(next);
+  };
+  const finish = () => {
+    if (!draggingRef.current) return;
+    setDrag(false);
+    setOffset((cur) => (cur < OPEN / 2 ? OPEN : 0)); // 滑过半自动打开，否则回弹
+  };
+
+  return (
+    <div
+      className="swipe-row-wrap"
+      style={{ borderTop: borderTop ? "1px solid var(--line)" : "none" }}
+    >
+      <button
+        type="button"
+        className="swipe-delete"
+        onClick={onDelete}
+        aria-label={ariaLabel || "删除"}
+      >
+        删除
+      </button>
+      <div
+        className="swipe-row-content"
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: dragging ? "none" : "transform 0.2s ease",
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={finish}
+        onPointerCancel={finish}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, budgetToday, availableBalance, jumpToAdd, jumpToStats, onConsumeJump, onConsumeStatsJump }) {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState(null);
@@ -1014,20 +1077,17 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
               <Section title={isToday ? "今日收入" : "当日收入"} sub={`${daySavings.length} 笔`}>
                 <div className="card-tasks">
                   {daySavings.map((e, i) => (
-                    <div
-                      key={e.id}
-                      className="ledger-row"
-                      style={{ borderTop: i === 0 ? "none" : "1px solid var(--line)" }}
-                      onClick={() => deleteSaving(e.id)}
-                    >
-                      <span className="ledger-emoji">💰</span>
-                      <span className="ledger-label">
-                        <span>收入</span>
-                        {e.note && <span className="ledger-note">{e.note}</span>}
-                      </span>
-                      <span className="ledger-time">{formatTime(e.t)}</span>
-                      <span className="ledger-amount" style={{ color: "var(--moss)" }}>¥{e.amount}</span>
-                    </div>
+                    <SwipeRow key={e.id} borderTop={i !== 0} onDelete={() => deleteSaving(e.id)} ariaLabel="删除收入">
+                      <div className="ledger-row">
+                        <span className="ledger-emoji">💰</span>
+                        <span className="ledger-label">
+                          <span>收入</span>
+                          {e.note && <span className="ledger-note">{e.note}</span>}
+                        </span>
+                        <span className="ledger-time">{formatTime(e.t)}</span>
+                        <span className="ledger-amount" style={{ color: "var(--moss)" }}>¥{e.amount}</span>
+                      </div>
+                    </SwipeRow>
                   ))}
                 </div>
               </Section>
@@ -1039,23 +1099,20 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
                   <div className="ledger-empty">{isToday ? "还没有记录，点下面记一笔" : "这一天没有记录"}</div>
                 ) : (
                   dayEntries.map((e, i) => (
-                    <div
-                      key={e.id}
-                      className="ledger-row"
-                      style={{ borderTop: i === 0 ? "none" : "1px solid var(--line)" }}
-                      onClick={() => deleteEntry(e.id)}
-                    >
-                      <span className="ledger-emoji">{e.emoji}</span>
-                      <span className="ledger-label">
-                        <span>
-                          {e.label}
-                          {e.subLabel && <span className="ledger-sublabel"> · {e.subLabel}</span>}
+                    <SwipeRow key={e.id} borderTop={i !== 0} onDelete={() => deleteEntry(e.id)} ariaLabel={`删除 ${e.label}`}>
+                      <div className="ledger-row">
+                        <span className="ledger-emoji">{e.emoji}</span>
+                        <span className="ledger-label">
+                          <span>
+                            {e.label}
+                            {e.subLabel && <span className="ledger-sublabel"> · {e.subLabel}</span>}
+                          </span>
+                          {e.note && <span className="ledger-note">{e.note}</span>}
                         </span>
-                        {e.note && <span className="ledger-note">{e.note}</span>}
-                      </span>
-                      <span className="ledger-time">{formatTime(e.t)}</span>
-                      <span className="ledger-amount">¥{e.amount}</span>
-                    </div>
+                        <span className="ledger-time">{formatTime(e.t)}</span>
+                        <span className="ledger-amount">¥{e.amount}</span>
+                      </div>
+                    </SwipeRow>
                   ))
                 )}
               </div>
@@ -3061,7 +3118,31 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     align-items: center;
     gap: 10px;
     padding: 11px 0;
+  }
+  /* 左滑删除行 */
+  .swipe-row-wrap {
+    position: relative;
+    overflow: hidden;
+  }
+  .swipe-delete {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 76px;
+    border: none;
+    background: var(--clay);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
     cursor: pointer;
+  }
+  .swipe-row-content {
+    position: relative;
+    background: #fff;
+    padding: 0 2px;
+    touch-action: pan-y;
+    user-select: none;
   }
   .ledger-emoji { font-size: 16px; }
   .ledger-label { flex: 1; font-size: 14px; color: var(--ink); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
