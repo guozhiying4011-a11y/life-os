@@ -353,7 +353,7 @@ const saveBalance = (bal) => {
   } catch (e) {}
 };
 
-// ---------- poop (嗯嗯日记) ----------
+// ---------- poop (一坨记事) ----------
 const POOP_KEY = "poop-sessions";
 const POOP_TYPES = [
   { id: "formed", label: "成形", emoji: "💪" },
@@ -609,7 +609,7 @@ function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy
               </div>
             </Section>
 
-            <Section title="今日嗯嗯" compact>
+            <Section title="今日一坨" compact>
               <div className="card-compact card-tappable" onClick={onOpenPoop}>
                 <div className="row-between-compact">
                   <span className="card-label">🚽 一坨记事</span>
@@ -1558,7 +1558,7 @@ function StudyTree({ seconds, running }) {
   );
 }
 
-// 嗯嗯日记：每日排便记录，记录形态/备注，看本周本月规律
+// 一坨记事：每日排便记录，记录形态/备注，看本周本月规律
 function PoopScreen({ sessions, setSessions }) {
   const [type, setType] = useState(null);
   const [note, setNote] = useState("");
@@ -1586,7 +1586,7 @@ function PoopScreen({ sessions, setSessions }) {
 
   const reflection =
     todayCount === 0
-      ? "今天还没有记录，嗯嗯顺畅最重要。"
+      ? "今天还没有记录，顺畅最重要。"
       : todayCount === 1
         ? "今天已经 1 次，状态不错。"
         : todayCount <= 3
@@ -1660,7 +1660,7 @@ function PoopScreen({ sessions, setSessions }) {
                     >
                       <span className="ledger-emoji">{ti ? ti.emoji : "🚽"}</span>
                       <span className="ledger-label">
-                        <span>{ti ? ti.label : "嗯嗯"}</span>
+                        <span>{ti ? ti.label : "一坨"}</span>
                         {s.note && <span className="ledger-note">{s.note}</span>}
                       </span>
                       <span className="ledger-time">{formatTime(s.t)}</span>
@@ -3676,7 +3676,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     cursor: not-allowed;
   }
 
-  /* ---- Poop screen (嗯嗯日记) ---- */
+  /* ---- Poop screen (一坨记事) ---- */
   .poop-hero {
     flex: 0 0 auto;
     text-align: center;
