@@ -196,13 +196,10 @@ const loadState = () => {
     const parsed = JSON.parse(raw);
     if (parsed.date !== todayDateStr()) {
       const streak = parsed.ended ? parsed.streak + 1 : 0;
-      // 跨天时，把"昨日预算 - 昨日消费"累加到可支配额度
-      const yesterdayBudget = parsed.budgetToday ?? defaultState().budgetToday;
-      const yesterdaySpend = parsed.spendToday ?? 0;
-      const dayDelta = Math.round((yesterdayBudget - yesterdaySpend) * 100) / 100;
-      const newBalance = Math.round((loadBalance() + dayDelta) * 100) / 100;
-      saveBalance(newBalance);
       // 预算和学习目标沿用上一天的设置（而非重置为默认值）
+      // 可支配额度的累计结余改为按"自然月"重新计算（见 computeMonthBalance），
+      // 跨天/跨月不再在这里手动累加，由 App 加载时统一回算
+      const yesterdayBudget = parsed.budgetToday ?? defaultState().budgetToday;
       return {
         ...defaultState(),
         streak,
@@ -380,47 +377,34 @@ const countPoopForDate = (sessions, dateStr) =>
 const countPoopSince = (sessions, dateStr) =>
   sessions.filter((s) => entryDateStr(s.t) >= dateStr).length;
 
-// 回算历史结余：从第一条消费记录开始，把过去每天的"预算-消费"累加到 balance
-// 只执行一次，用 budget-balance-backfilled 标记
-const BACKFILL_KEY = "budget-balance-backfilled";
-const backfillBalance = (entries, dailyBudget) => {
+// 可支配额度的累计结余：按"自然月"计算，每月1号清零重新累计
+// 累计 = 本月1日 ~ 昨天 每天的 (每日预算 - 当日消费) 之和
+// 今天的不算在这里，由 availableBalance 实时加上 (budgetToday - spendToday)
+const computeMonthBalance = (entries, dailyBudget) => {
   try {
-    if (localStorage.getItem(BACKFILL_KEY)) return loadBalance();
-    if (!entries || entries.length === 0) {
-      localStorage.setItem(BACKFILL_KEY, "1");
-      return loadBalance();
-    }
     const today = todayDateStr();
-    // 收集所有过去日期（不含今天）
-    const dates = new Set();
-    entries.forEach((e) => {
-      const ds = entryDateStr(e.t);
-      if (ds < today) dates.add(ds);
-    });
-    if (dates.size === 0) {
-      localStorage.setItem(BACKFILL_KEY, "1");
-      return loadBalance();
-    }
-    // 按日期汇总每天消费
+    const monthStart = startOfMonthStr();
+    // 按日期汇总本月过去日期（不含今天）的消费
     const spendByDate = {};
-    entries.forEach((e) => {
+    (entries || []).forEach((e) => {
       const ds = entryDateStr(e.t);
-      if (ds < today) {
+      if (ds >= monthStart && ds < today) {
         spendByDate[ds] = (spendByDate[ds] || 0) + e.amount;
       }
     });
-    // 累加每天的结余
-    let bal = loadBalance();
-    Object.keys(spendByDate).forEach((ds) => {
-      const daySpend = spendByDate[ds] || 0;
-      bal += dailyBudget - daySpend;
-    });
-    bal = Math.round(bal * 100) / 100;
-    saveBalance(bal);
-    localStorage.setItem(BACKFILL_KEY, "1");
-    return bal;
+    // 遍历本月1日到昨天的每一个自然日，累加 (预算 - 消费)
+    let bal = 0;
+    const cursor = new Date(monthStart + "T00:00:00");
+    const end = new Date(today + "T00:00:00");
+    while (cursor.getTime() < end.getTime()) {
+      const ds = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+      const spend = spendByDate[ds] || 0;
+      bal += dailyBudget - spend;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return Math.round(bal * 100) / 100;
   } catch (e) {
-    return loadBalance();
+    return 0;
   }
 };
 
@@ -2148,14 +2132,13 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
         if (Array.isArray(parsed.savings)) setSavings(parsed.savings);
         if (Array.isArray(parsed.poopSessions)) setPoopSessions(parsed.poopSessions);
         if (typeof parsed.budgetBalance === "number") {
-          setBudgetBalance(parsed.budgetBalance);
+          // 备份里有值也以本月实际为准（跨月/数据变化后会重新回算）
           saveBalance(parsed.budgetBalance);
-        } else {
-          // 旧备份没有 budgetBalance，重新回算
-          localStorage.removeItem(BACKFILL_KEY);
-          const bal = backfillBalance(parsed.entries || [], (parsed.state?.budgetToday) ?? defaultState().budgetToday);
-          setBudgetBalance(bal);
         }
+        // 按自然月重新计算可支配额度（1号清零，累计本月过去每天结余）
+        const bal = computeMonthBalance(parsed.entries || [], (parsed.state?.budgetToday) ?? defaultState().budgetToday);
+        setBudgetBalance(bal);
+        saveBalance(bal);
         setImportDone(true);
         setTimeout(() => setImportDone(false), 2500);
       } catch (err) {
@@ -2395,10 +2378,11 @@ function App() {
     setStudySessions(loadStudySessions());
     setSavings(loadSavings());
     setPoopSessions(loadPoopSessions());
-    // 回算历史结余（只执行一次），用当前预算作为每日预算
+    // 可支配额度按"自然月"重新计算：每月1号清零，累计本月过去每天的结余
     const dailyBudget = loadedState?.budgetToday ?? defaultState().budgetToday;
-    const backfilledBalance = backfillBalance(loadedEntries, dailyBudget);
-    setBudgetBalance(backfilledBalance);
+    const monthBalance = computeMonthBalance(loadedEntries, dailyBudget);
+    setBudgetBalance(monthBalance);
+    saveBalance(monthBalance);
     setLoading(false);
   }, []);
 
@@ -2412,6 +2396,14 @@ function App() {
     // keep today's spend in sync with the entry log (single source of truth)
     setState((s) => (s ? { ...s, spendToday: sumEntriesForDate(entries, todayDateStr()) } : s));
   }, [entries]);
+
+  // 可支配额度随消费记录/每日预算变化实时回算（按自然月，1号清零）
+  useEffect(() => {
+    if (!state) return;
+    const bal = computeMonthBalance(entries, state.budgetToday);
+    setBudgetBalance(bal);
+    saveBalance(bal);
+  }, [entries, state?.budgetToday]);
 
   useEffect(() => {
     if (!loading) saveTodos(todos);
@@ -2454,7 +2446,6 @@ function App() {
     localStorage.removeItem(STUDY_KEY);
     localStorage.removeItem(SAVINGS_KEY);
     localStorage.removeItem(BALANCE_KEY);
-    localStorage.removeItem(BACKFILL_KEY);
     localStorage.removeItem(POOP_KEY);
     setState(defaultState());
     setEntries([]);
