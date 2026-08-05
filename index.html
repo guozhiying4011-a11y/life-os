@@ -353,6 +353,33 @@ const saveBalance = (bal) => {
   } catch (e) {}
 };
 
+// ---------- poop (嗯嗯日记) ----------
+const POOP_KEY = "poop-sessions";
+const POOP_TYPES = [
+  { id: "formed", label: "成形", emoji: "💪" },
+  { id: "hard", label: "偏硬", emoji: "🪨" },
+  { id: "soft", label: "偏软", emoji: "🫠" },
+  { id: "watery", label: "水样", emoji: "💧" },
+];
+const poopTypeById = (id) => POOP_TYPES.find((t) => t.id === id) || null;
+const loadPoopSessions = () => {
+  try {
+    const raw = localStorage.getItem(POOP_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+};
+const savePoopSessions = (sessions) => {
+  try {
+    localStorage.setItem(POOP_KEY, JSON.stringify(sessions));
+  } catch (e) {}
+};
+const countPoopForDate = (sessions, dateStr) =>
+  sessions.filter((s) => entryDateStr(s.t) === dateStr).length;
+const countPoopSince = (sessions, dateStr) =>
+  sessions.filter((s) => entryDateStr(s.t) >= dateStr).length;
+
 // 回算历史结余：从第一条消费记录开始，把过去每天的"预算-消费"累加到 balance
 // 只执行一次，用 budget-balance-backfilled 标记
 const BACKFILL_KEY = "budget-balance-backfilled";
@@ -406,9 +433,10 @@ const formatHours = (minutes) => {
 };
 
 
-function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy, onOpenLedgerStats, onRecordDay, availableBalance }) {
+function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy, onOpenLedgerStats, onOpenPoop, poopToday, onRecordDay, availableBalance }) {
   const [holdProgress, setHoldProgress] = useState(0);
   const [holding, setHolding] = useState(false);
+  const [quickTodo, setQuickTodo] = useState("");
 
   const holdRafRef = useRef(null);
   const holdStartRef = useRef(0);
@@ -436,6 +464,29 @@ function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy
       )
     );
   }, [setTodos]);
+
+  const addQuickTodo = useCallback(() => {
+    const title = quickTodo.trim();
+    if (!title) return;
+    setTodos((prev) => [
+      ...prev,
+      {
+        id: "todo" + Date.now(),
+        title,
+        tag: null,
+        priority: "mid",
+        dueDate: todayDateStr(),
+        dueTime: null,
+        reminder: "none",
+        notified: false,
+        done: false,
+        completedOn: null,
+        createdAt: Date.now(),
+      },
+    ]);
+    setQuickTodo("");
+    if (navigator.vibrate) navigator.vibrate(10);
+  }, [quickTodo, setTodos]);
 
   const doneCount = relevantTodos.filter((t) => t.done).length;
   const totalCount = relevantTodos.length;
@@ -558,6 +609,17 @@ function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy
               </div>
             </Section>
 
+            <Section title="今日嗯嗯" compact>
+              <div className="card-compact card-tappable" onClick={onOpenPoop}>
+                <div className="row-between-compact">
+                  <span className="card-label">🚽 嗯嗯日记</span>
+                  <span className="card-value-muted">
+                    {poopToday > 0 ? `今日 ${poopToday} 次 ›` : "记录 ›"}
+                  </span>
+                </div>
+              </div>
+            </Section>
+
             <Section title="今日重点" sub={`${doneCount}/${totalCount} 完成`} compact grow onSubClick={onOpenTodo}>
               <div className="card-tasks">
                 {relevantTodos.length === 0 ? (
@@ -585,6 +647,24 @@ function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy
                     );
                   })
                 )}
+              </div>
+              <div className="quick-todo-row">
+                <input
+                  className="quick-todo-input"
+                  placeholder="添加任务，回车确认"
+                  value={quickTodo}
+                  onChange={(e) => setQuickTodo(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addQuickTodo()}
+                  maxLength={60}
+                />
+                <button
+                  className={"quick-todo-add" + (quickTodo.trim() ? "" : " quick-todo-add-disabled")}
+                  onClick={addQuickTodo}
+                  disabled={!quickTodo.trim()}
+                  aria-label="添加任务"
+                >
+                  +
+                </button>
               </div>
             </Section>
 
@@ -1478,6 +1558,124 @@ function StudyTree({ seconds, running }) {
   );
 }
 
+// 嗯嗯日记：每日排便记录，记录形态/备注，看本周本月规律
+function PoopScreen({ sessions, setSessions }) {
+  const [type, setType] = useState(null);
+  const [note, setNote] = useState("");
+  const todayStr = todayDateStr();
+  const todaySessions = sessions
+    .filter((s) => entryDateStr(s.t) === todayStr)
+    .sort((a, b) => b.t - a.t);
+  const todayCount = todaySessions.length;
+  const weekCount = countPoopSince(sessions, startOfWeekStr());
+  const monthCount = countPoopSince(sessions, startOfMonthStr());
+
+  const record = useCallback(() => {
+    setSessions((prev) => [
+      ...prev,
+      { id: "p" + Date.now(), type, note: note.trim() || null, t: Date.now() },
+    ]);
+    setType(null);
+    setNote("");
+    if (navigator.vibrate) navigator.vibrate(10);
+  }, [type, note, setSessions]);
+
+  const deleteSession = useCallback((id) => {
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+  }, [setSessions]);
+
+  const reflection =
+    todayCount === 0
+      ? "今天还没有记录，嗯嗯顺畅最重要。"
+      : todayCount === 1
+        ? "今天已经 1 次，状态不错。"
+        : todayCount <= 3
+          ? `今天 ${todayCount} 次，挺规律的。`
+          : `今天 ${todayCount} 次，留意一下肠胃哦。`;
+
+  return (
+    <div className="page">
+      <div className="container">
+        <div className="header">
+          <span className="eyebrow">嗯嗯日记</span>
+          <span className="streak">今日 {todayCount} 次</span>
+        </div>
+
+        <div className="poop-hero">
+          <div className="poop-hero-emoji">🚽</div>
+          <div className="poop-hero-count">{todayCount}</div>
+          <div className="poop-hero-hint">{reflection}</div>
+        </div>
+
+        <div className="poop-form">
+          <div className="composer-label">形态（可选）</div>
+          <div className="subcategory-row">
+            {POOP_TYPES.map((t) => (
+              <button
+                key={t.id}
+                className={"subcategory-chip" + (type === t.id ? " subcategory-chip-active" : "")}
+                onClick={() => setType(type === t.id ? null : t.id)}
+              >
+                {t.emoji} {t.label}
+              </button>
+            ))}
+          </div>
+          <input
+            className="ledger-note-input"
+            type="text"
+            placeholder="备注（可选）"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={50}
+          />
+          <button className="study-run-button" onClick={record}>记录这次</button>
+        </div>
+
+        <div className="study-stat-strip">
+          <div className="study-stat-cell">
+            <div className="study-stat-value">{weekCount}</div>
+            <div className="study-stat-label">本周</div>
+          </div>
+          <div className="study-stat-divider" />
+          <div className="study-stat-cell">
+            <div className="study-stat-value">{monthCount}</div>
+            <div className="study-stat-label">本月</div>
+          </div>
+        </div>
+
+        <div className="scrollless" style={{ marginTop: 8 }}>
+          <Section title="今日记录" sub={`${todaySessions.length} 次`} grow>
+            <div className="card-tasks">
+              {todaySessions.length === 0 ? (
+                <div className="ledger-empty">今天还没有记录，点上面记录一次</div>
+              ) : (
+                todaySessions.map((s, i) => {
+                  const ti = poopTypeById(s.type);
+                  return (
+                    <div
+                      key={s.id}
+                      className="ledger-row"
+                      style={{ borderTop: i === 0 ? "none" : "1px solid var(--line)" }}
+                      onClick={() => deleteSession(s.id)}
+                    >
+                      <span className="ledger-emoji">{ti ? ti.emoji : "🚽"}</span>
+                      <span className="ledger-label">
+                        <span>{ti ? ti.label : "嗯嗯"}</span>
+                        {s.note && <span className="ledger-note">{s.note}</span>}
+                      </span>
+                      <span className="ledger-time">{formatTime(s.t)}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </Section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function TodoScreen({ todos, setTodos, jumpToAdd, onConsumeJump }) {
   const [adding, setAdding] = useState(false);
@@ -1861,7 +2059,7 @@ function formatDateLabel() {
   return `${d.getMonth() + 1}月${d.getDate()}日 · ${weekday}`;
 }
 
-function MeScreen({ state, setState, history, setHistory, entries, setEntries, todos, setTodos, studySessions, setStudySessions, savings, setSavings, availableBalance, budgetBalance, setBudgetBalance, onResetAll }) {
+function MeScreen({ state, setState, history, setHistory, entries, setEntries, todos, setTodos, studySessions, setStudySessions, savings, setSavings, poopSessions, setPoopSessions, availableBalance, budgetBalance, setBudgetBalance, onResetAll }) {
   const [budgetInput, setBudgetInput] = useState(String(state.budgetToday));
   const [studyGoalInput, setStudyGoalInput] = useState(String(state.studyGoalMinutes));
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -1916,6 +2114,7 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
       history,
       studySessions,
       savings,
+      poopSessions,
       budgetBalance,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -1947,6 +2146,7 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
         if (Array.isArray(parsed.history)) setHistory(parsed.history);
         if (Array.isArray(parsed.studySessions)) setStudySessions(parsed.studySessions);
         if (Array.isArray(parsed.savings)) setSavings(parsed.savings);
+        if (Array.isArray(parsed.poopSessions)) setPoopSessions(parsed.poopSessions);
         if (typeof parsed.budgetBalance === "number") {
           setBudgetBalance(parsed.budgetBalance);
           saveBalance(parsed.budgetBalance);
@@ -2139,7 +2339,7 @@ function computeLongestStreak(history) {
   return longest;
 }
 
-function BottomNav({ tab, onChange, onQuickAdd }) {
+function BottomNav({ tab, onChange }) {
   return (
     <nav className="bottom-nav">
       <button
@@ -2150,8 +2350,13 @@ function BottomNav({ tab, onChange, onQuickAdd }) {
         <span className="nav-icon">🏠</span>
         <span className="nav-label">Today</span>
       </button>
-      <button className="nav-item nav-add" onClick={onQuickAdd} aria-label="记一笔">
-        <span className="nav-add-icon">+</span>
+      <button
+        className={"nav-item" + (tab === "ledger" ? " nav-item-active" : "")}
+        onClick={() => onChange("ledger")}
+        aria-label="记账"
+      >
+        <span className="nav-icon">📒</span>
+        <span className="nav-label">记账</span>
       </button>
       <button
         className={"nav-item" + (tab === "me" ? " nav-item-active" : "")}
@@ -2178,7 +2383,7 @@ function App() {
   const [jumpToAddLedger, setJumpToAddLedger] = useState(false);
   const [jumpToStatsLedger, setJumpToStatsLedger] = useState(false);
   const [jumpToAddTodo, setJumpToAddTodo] = useState(false);
-  const [showQuickSheet, setShowQuickSheet] = useState(false);
+  const [poopSessions, setPoopSessions] = useState([]);
 
   useEffect(() => {
     const loadedState = loadState();
@@ -2189,6 +2394,7 @@ function App() {
     setHistory(loadHistory());
     setStudySessions(loadStudySessions());
     setSavings(loadSavings());
+    setPoopSessions(loadPoopSessions());
     // 回算历史结余（只执行一次），用当前预算作为每日预算
     const dailyBudget = loadedState?.budgetToday ?? defaultState().budgetToday;
     const backfilledBalance = backfillBalance(loadedEntries, dailyBudget);
@@ -2224,6 +2430,10 @@ function App() {
     saveSavings(savings);
   }, [savings]);
 
+  useEffect(() => {
+    savePoopSessions(poopSessions);
+  }, [poopSessions]);
+
   // 实时可支配额度 = 累计结余 + (今日预算 - 今日消费)
   const availableBalance = state
     ? Math.round((budgetBalance + (state.budgetToday - state.spendToday)) * 100) / 100
@@ -2245,12 +2455,14 @@ function App() {
     localStorage.removeItem(SAVINGS_KEY);
     localStorage.removeItem(BALANCE_KEY);
     localStorage.removeItem(BACKFILL_KEY);
+    localStorage.removeItem(POOP_KEY);
     setState(defaultState());
     setEntries([]);
     setTodos(defaultTodos());
     setHistory([]);
     setStudySessions([]);
     setSavings([]);
+    setPoopSessions([]);
     setBudgetBalance(0);
   }, []);
 
@@ -2284,21 +2496,6 @@ function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const openQuickSheet = useCallback(() => setShowQuickSheet(true), []);
-  const closeQuickSheet = useCallback(() => setShowQuickSheet(false), []);
-
-  const quickAddLedger = useCallback(() => {
-    setShowQuickSheet(false);
-    setTab("ledger");
-    setJumpToAddLedger(true);
-  }, []);
-
-  const quickAddTodo = useCallback(() => {
-    setShowQuickSheet(false);
-    setTab("todo");
-    setJumpToAddTodo(true);
-  }, []);
-
   if (loading || !state) {
     return (
       <div className="page-center">
@@ -2321,6 +2518,8 @@ function App() {
             setTab("ledger");
             setJumpToStatsLedger(true);
           }}
+          onOpenPoop={() => setTab("poop")}
+          poopToday={countPoopForDate(poopSessions, todayDateStr())}
           onRecordDay={recordDay}
           availableBalance={availableBalance}
         />
@@ -2355,6 +2554,12 @@ function App() {
           studyGoalMinutes={state.studyGoalMinutes}
         />
       )}
+      {tab === "poop" && (
+        <PoopScreen
+          sessions={poopSessions}
+          setSessions={setPoopSessions}
+        />
+      )}
       {tab === "me" && (
         <MeScreen
           state={state}
@@ -2369,38 +2574,15 @@ function App() {
           setStudySessions={setStudySessions}
           savings={savings}
           setSavings={setSavings}
+          poopSessions={poopSessions}
+          setPoopSessions={setPoopSessions}
           availableBalance={availableBalance}
           budgetBalance={budgetBalance}
           setBudgetBalance={setBudgetBalance}
           onResetAll={resetAllData}
         />
       )}
-      <BottomNav tab={tab} onChange={setTab} onQuickAdd={openQuickSheet} />
-      {showQuickSheet && (
-        <QuickAddSheet
-          onLedger={quickAddLedger}
-          onTodo={quickAddTodo}
-          onClose={closeQuickSheet}
-        />
-      )}
-    </div>
-  );
-}
-
-function QuickAddSheet({ onLedger, onTodo, onClose }) {
-  return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet-panel" onClick={(e) => e.stopPropagation()}>
-        <button className="sheet-option" onClick={onLedger}>
-          <span className="sheet-option-emoji">💰</span>
-          <span>记一笔</span>
-        </button>
-        <button className="sheet-option" onClick={onTodo}>
-          <span className="sheet-option-emoji">✓</span>
-          <span>添加任务</span>
-        </button>
-        <button className="sheet-cancel" onClick={onClose}>取消</button>
-      </div>
+      <BottomNav tab={tab} onChange={setTab} />
     </div>
   );
 }
@@ -2439,17 +2621,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   .nav-item-active .nav-icon { opacity: 1; }
   .nav-label { font-size: 10.5px; }
   .nav-item-active .nav-label { color: var(--moss); font-weight: 600; }
-  .nav-add {
-    background: var(--moss);
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    justify-content: center;
-    padding: 0;
-    margin-top: -18px;
-    box-shadow: 0 2px 8px rgba(92, 122, 92, 0.35);
-  }
-  .nav-add-icon { color: #fff; font-size: 24px; line-height: 1; }
   .me-container {
     padding-top: 8px;
   }
@@ -3465,6 +3636,70 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     border-radius: 12px;
     padding: 11px 12px;
     background: #fff;
+  }
+
+  /* ---- Quick todo add (on Today) ---- */
+  .quick-todo-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 0 2px;
+    flex: 0 0 auto;
+  }
+  .quick-todo-input {
+    flex: 1;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 11px 14px;
+    background: #fff;
+    outline: none;
+  }
+  .quick-todo-input:focus { border-color: var(--moss); }
+  .quick-todo-input::placeholder { color: var(--muted); }
+  .quick-todo-add {
+    width: 44px;
+    flex: 0 0 auto;
+    border: none;
+    border-radius: 12px;
+    background: var(--moss);
+    color: #fff;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .quick-todo-add-disabled {
+    background: var(--line);
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+
+  /* ---- Poop screen (嗯嗯日记) ---- */
+  .poop-hero {
+    flex: 0 0 auto;
+    text-align: center;
+    padding: 6px 0 4px;
+  }
+  .poop-hero-emoji {
+    font-size: 44px;
+    line-height: 1;
+  }
+  .poop-hero-count {
+    margin-top: 4px;
+    font-size: 30px;
+    font-family: Georgia, "Songti SC", serif;
+    color: var(--ink);
+  }
+  .poop-hero-hint {
+    margin-top: 2px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .poop-form {
+    flex: 0 0 auto;
+    margin-top: 8px;
   }
 </style>
 </body>
