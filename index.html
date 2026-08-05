@@ -538,7 +538,7 @@ function TodayScreen({ state, setState, todos, setTodos, onOpenTodo, onOpenStudy
                 <div className="balance-row">
                   <span className="balance-label">可支配额度</span>
                   <span className="balance-value" style={{ color: availableBalance >= 0 ? "var(--moss)" : "var(--clay)" }}>
-                    {availableBalance >= 0 ? "¥" + availableBalance : "-¥" + Math.abs(availableBalance)}
+                    {availableBalance >= 0 ? "¥" + formatBalance(availableBalance) : "-¥" + formatBalance(Math.abs(availableBalance))}
                   </span>
                 </div>
               </div>
@@ -648,11 +648,13 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
   const [addingSaving, setAddingSaving] = useState(false);
   const [savingAmount, setSavingAmount] = useState("");
   const [view, setView] = useState("list"); // list | stats
+  const [listDate, setListDate] = useState(todayDateStr());
 
   useEffect(() => {
     if (jumpToAdd) {
       setAdding(true);
       setView("list");
+      setListDate(todayDateStr());
       onConsumeJump();
     }
   }, [jumpToAdd, onConsumeJump]);
@@ -667,12 +669,14 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
   const budgetLeft = budgetToday - spendToday;
   const budgetPct = Math.min(100, Math.round((spendToday / budgetToday) * 100));
   const todayStr = todayDateStr();
-  const todayEntries = entries
-    .filter((e) => entryDateStr(e.t) === todayStr)
+  const isToday = listDate === todayStr;
+  const dayEntries = entries
+    .filter((e) => entryDateStr(e.t) === listDate)
     .sort((a, b) => b.t - a.t);
-  const todaySavings = savings
-    .filter((e) => entryDateStr(e.t) === todayStr)
+  const daySavings = savings
+    .filter((e) => entryDateStr(e.t) === listDate)
     .sort((a, b) => b.t - a.t);
+  const dayTotal = sumEntriesForDate(entries, listDate);
   const todaySaved = sumSavingsForDate(savings, todayStr);
 
   const selectedCat = category ? categoryById(category) : null;
@@ -716,6 +720,7 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
       },
     ]);
     resetPad();
+    setListDate(todayDateStr());
     if (navigator.vibrate) navigator.vibrate(10);
   }, [amount, category, subCategory, canSave, setEntries]);
 
@@ -745,6 +750,7 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
     ]);
     setSavingAmount("");
     setAddingSaving(false);
+    setListDate(todayDateStr());
     if (navigator.vibrate) navigator.vibrate(10);
   }, [savingAmount, canSaveSaving, setSavings]);
 
@@ -891,15 +897,37 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
               <div className="balance-row" style={{ marginTop: 8 }}>
                 <span className="balance-label">可支配额度</span>
                 <span className="balance-value" style={{ color: availableBalance >= 0 ? "var(--moss)" : "var(--clay)" }}>
-                  {availableBalance >= 0 ? "¥" + availableBalance : "-¥" + Math.abs(availableBalance)}
+                  {availableBalance >= 0 ? "¥" + formatBalance(availableBalance) : "-¥" + formatBalance(Math.abs(availableBalance))}
                 </span>
               </div>
             </div>
 
-            {todaySavings.length > 0 && (
-              <Section title="今日收入" sub={`${todaySavings.length} 笔`}>
+            <div className="date-nav">
+              <button
+                className="date-nav-btn"
+                onClick={() => setListDate(shiftDate(listDate, -1))}
+                aria-label="前一天"
+              >
+                ‹
+              </button>
+              <span className="date-nav-label">{dateNavLabel(listDate)}</span>
+              <button
+                className="date-nav-btn"
+                disabled={isToday}
+                onClick={() => setListDate(shiftDate(listDate, 1))}
+                aria-label="后一天"
+              >
+                ›
+              </button>
+            </div>
+            {!isToday && dayTotal > 0 && (
+              <div className="day-total-row">当日消费 ¥{formatMoney(dayTotal)}</div>
+            )}
+
+            {daySavings.length > 0 && (
+              <Section title={isToday ? "今日收入" : "当日收入"} sub={`${daySavings.length} 笔`}>
                 <div className="card-tasks">
-                  {todaySavings.map((e, i) => (
+                  {daySavings.map((e, i) => (
                     <div
                       key={e.id}
                       className="ledger-row"
@@ -916,12 +944,12 @@ function LedgerScreen({ entries, setEntries, savings, setSavings, spendToday, bu
               </Section>
             )}
 
-            <Section title="今日明细" sub={`${todayEntries.length} 笔`} grow>
+            <Section title="明细" sub={`${dayEntries.length} 笔`} grow>
               <div className="card-tasks">
-                {todayEntries.length === 0 ? (
-                  <div className="ledger-empty">还没有记录，点下面记一笔</div>
+                {dayEntries.length === 0 ? (
+                  <div className="ledger-empty">{isToday ? "还没有记录，点下面记一笔" : "这一天没有记录"}</div>
                 ) : (
-                  todayEntries.map((e, i) => (
+                  dayEntries.map((e, i) => (
                     <div
                       key={e.id}
                       className="ledger-row"
@@ -1172,6 +1200,26 @@ function formatMoney(n) {
   const v = Math.round(n * 100) / 100;
   return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0$/, "");
 }
+
+// 余额始终保留两位小数
+const formatBalance = (n) => (Math.round(n * 100) / 100).toFixed(2);
+
+// 日期前后移动一天，返回 YYYY-MM-DD
+const shiftDate = (dateStr, deltaDays) => {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + deltaDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// 明细日期导航的展示文案：今日 / 昨天 / M月D日 周X
+const dateNavLabel = (dateStr) => {
+  const today = todayDateStr();
+  if (dateStr === today) return "今日";
+  if (dateStr === shiftDate(today, -1)) return "昨天";
+  const d = new Date(dateStr + "T00:00:00");
+  const weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][d.getDay()];
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${weekday}`;
+};
 
 function startOfWeek(d) {
   const date = new Date(d);
@@ -1954,7 +2002,7 @@ function MeScreen({ state, setState, history, setHistory, entries, setEntries, t
             <div className="me-stat-divider" />
             <div className="me-stat-cell">
               <div className="me-stat-value" style={{ color: availableBalance >= 0 ? "var(--moss)" : "var(--clay)" }}>
-                {availableBalance >= 0 ? "¥" + availableBalance : "-¥" + Math.abs(availableBalance)}
+                {availableBalance >= 0 ? "¥" + formatBalance(availableBalance) : "-¥" + formatBalance(Math.abs(availableBalance))}
               </div>
               <div className="me-stat-label">可支配额度</div>
             </div>
@@ -2752,6 +2800,44 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
     margin-top: 4px;
     font-size: 12.5px;
     color: var(--moss);
+  }
+  .date-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 2px 8px;
+    flex: 0 0 auto;
+  }
+  .date-nav-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--moss);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .date-nav-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  .date-nav-label {
+    font-size: 13px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .day-total-row {
+    font-size: 11.5px;
+    color: var(--muted);
+    text-align: center;
+    padding-bottom: 8px;
+    flex: 0 0 auto;
   }
   .ledger-saving-tag {
     margin-left: 8px;
